@@ -585,7 +585,13 @@ public class ActionInvoker {
         return result;
     }
 
+    private static java.util.Map<String, Object[]> actionMethodCache = new java.util.HashMap<String, Object[]>();
+
     public static Object[] getActionMethod(String fullAction) {
+        if(actionMethodCache.containsKey(fullAction)) {
+            return actionMethodCache.get(fullAction);
+        }
+
         Method actionMethod = null;
         Class controllerClass = null;
         try {
@@ -594,13 +600,13 @@ public class ActionInvoker {
             }
             String controller = fullAction.substring(0, fullAction.lastIndexOf("."));
             String action = fullAction.substring(fullAction.lastIndexOf(".") + 1);
-            controllerClass = Play.classloader.getClassIgnoreCase(controller);
+            controllerClass = Play.classloader.loadApplicationClass(controller);
             if (controllerClass == null) {
                 throw new ActionNotFoundException(fullAction, new Exception("Controller " + controller + " not found"));
             }
             if (!ControllerSupport.class.isAssignableFrom(controllerClass)) {
                 // Try the scala way
-                controllerClass = Play.classloader.getClassIgnoreCase(controller + "$");
+                controllerClass = Play.classloader.loadApplicationClass(controller + "$");
                 if (!ControllerSupport.class.isAssignableFrom(controllerClass)) {
                     throw new ActionNotFoundException(fullAction, new Exception("class " + controller + " does not extend play.mvc.Controller"));
                 }
@@ -614,16 +620,26 @@ public class ActionInvoker {
         } catch (Exception e) {
             throw new ActionNotFoundException(fullAction, e);
         }
-        return new Object[]{controllerClass, actionMethod};
+
+        Object[] r = new Object[]{controllerClass, actionMethod};
+
+        actionMethodCache.put(fullAction, r);
+
+        return r;
     }
 
+    private static java.util.Map<Method, String[]> actionMethodParamsCache = new java.util.HashMap<Method, String[]>();
 
     public static Object[] getActionMethodArgs(Method method, Object o) throws Exception {
-        String[] paramsNames = Java.parameterNames(method);
+        String[] paramsNames = actionMethodParamsCache.get(method);
+        if(paramsNames == null) {
+            paramsNames = Java.parameterNames(method);
+            actionMethodParamsCache.put(method, paramsNames);
+        }
+
         if (paramsNames == null && method.getParameterTypes().length > 0) {
             throw new UnexpectedException("Parameter names not found for method " + method);
         }
-
 
         // Check if we have already performed the bind operation
         Object[] rArgs = CachedBoundActionMethodArgs.current().retrieveActionMethodArgs(method);
