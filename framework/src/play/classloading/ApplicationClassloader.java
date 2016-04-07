@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -52,7 +53,7 @@ public class ApplicationClassloader extends ClassLoader {
      * This protection domain applies to all loaded classes.
      */
     public ProtectionDomain protectionDomain;
-
+    
     public ApplicationClassloader() {
         super(ApplicationClassloader.class.getClassLoader());
         // Clean the existing classes
@@ -74,7 +75,10 @@ public class ApplicationClassloader extends ClassLoader {
      * You know ...
      */
     @Override
-    protected synchronized Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+    protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+        long start = System.currentTimeMillis();
+
+        // Loook up our cache
         Class<?> c = findLoadedClass(name);
         if (c != null) {
             return c;
@@ -89,7 +93,7 @@ public class ApplicationClassloader extends ClassLoader {
             return applicationClass;
         }
 
-        // Delegate to the classic classloader
+        // Delegate tothe classic classloader
         return super.loadClass(name, resolve);
     }
 
@@ -104,6 +108,7 @@ public class ApplicationClassloader extends ClassLoader {
         }
 
         if (Play.usePrecompiled) {
+
             try {
                 File file = Play.getFile("precompiled/java/" + name.replace(".", "/") + ".class");
                 if (!file.exists()) {
@@ -126,6 +131,7 @@ public class ApplicationClassloader extends ClassLoader {
                         applicationClass.javaPackage = applicationClass.javaClass.getPackage();
                     }
                 }
+
                 return clazz;
             } catch (Exception e) {
                 throw new RuntimeException("Cannot find precompiled class file for " + name);
@@ -460,23 +466,23 @@ public class ApplicationClassloader extends ClassLoader {
         return results;
     }
 
-    /**
-     * Find a class in a case insensitive way
-     * @param name The class name.
-     * @return a class
-     */
-    public Class getClassIgnoreCase(String name) {
-        getAllClasses();
-        for (ApplicationClass c : Play.classes.all()) {
-            if (c.name.equalsIgnoreCase(name) || c.name.replace("$", ".").equalsIgnoreCase(name)) {
-                if (Play.usePrecompiled) {
-                    return c.javaClass;
-                }
-                return loadApplicationClass(c.name);
-            }
-        }
-        return null;
-    }
+//    /**
+//     * Find a class in a case insensitive way
+//     * @param name The class name.
+//     * @return a class
+//     */
+//    public Class getClassIgnoreCase(String name) {
+//        getAllClasses();
+//        for (ApplicationClass c : Play.classes.all()) {
+//            if (c.name.equalsIgnoreCase(name) || c.name.replace("$", ".").equalsIgnoreCase(name)) {
+//                if (Play.usePrecompiled) {
+//                    return c.javaClass;
+//                }
+//                return loadApplicationClass(c.name);
+//            }
+//        }
+//        return null;
+//    }
 
     /**
      * Retrieve all application classes with a specific annotation.

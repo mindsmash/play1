@@ -6,7 +6,10 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.HashMap;
+
 import javassist.CannotCompileException;
 import javassist.CtBehavior;
 import javassist.CtClass;
@@ -24,7 +27,7 @@ import play.classloading.ApplicationClasses.ApplicationClass;
 import play.exceptions.UnexpectedException;
 
 /**
- * Generate valid JavaBeans. 
+ * Generate valid JavaBeans.
  */
 public class PropertiesEnhancer extends Enhancer {
 
@@ -35,7 +38,7 @@ public class PropertiesEnhancer extends Enhancer {
         if (ctClass.isInterface()) {
             return;
         }
-        if(ctClass.getName().endsWith(".package")) {
+        if (ctClass.getName().endsWith(".package")) {
             return;
         }
 
@@ -146,7 +149,7 @@ public class PropertiesEnhancer extends Enhancer {
                             // Si c'est un getter ou un setter
                             String propertyName = null;
                             if (fieldAccess.getField().getDeclaringClass().equals(ctMethod.getDeclaringClass())
-                                || ctMethod.getDeclaringClass().subclassOf(fieldAccess.getField().getDeclaringClass())) {
+                                    || ctMethod.getDeclaringClass().subclassOf(fieldAccess.getField().getDeclaringClass())) {
                                 if ((ctMethod.getName().startsWith("get") || (!isFinal(fieldAccess.getField()) && ctMethod.getName().startsWith("set"))) && ctMethod.getName().length() > 3) {
                                     propertyName = ctMethod.getName().substring(3);
                                     propertyName = propertyName.substring(0, 1).toLowerCase() + propertyName.substring(1);
@@ -208,23 +211,42 @@ public class PropertiesEnhancer extends Enhancer {
      */
     public static class FieldAccessor {
 
+        private static java.util.Map<String, Object> getterCache = new java.util.HashMap<String, Object>();
+        private static java.util.Map<String, Object> setterCache = new java.util.HashMap<String, Object>();
+
         public static Object invokeReadProperty(Object o, String property, String targetType, String invocationPoint) throws Throwable {
             if (o == null) {
                 throw new NullPointerException("Try to read " + property + " on null object " + targetType + " (" + invocationPoint + ")");
             }
+
+            String cacheKey = o.getClass().getName() + "#" + property;
+            Object getter = getterCache.get(cacheKey);
+
+            if (getter != null) {
+                if (getter instanceof Field) {
+                    return ((Field) getter).get(o);
+                }
+
+                try {
+                    return ((Method) getter).invoke(o);
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
+            }
+
+            // populate cache
             if (o.getClass().getClassLoader() == null || !o.getClass().getClassLoader().equals(Play.classloader)) {
-                return o.getClass().getField(property).get(o);
+                getterCache.put(cacheKey, o.getClass().getField(property));
+            } else {
+                String getterName = "get" + property.substring(0, 1).toUpperCase() + property.substring(1);
+                try {
+                    getterCache.put(cacheKey, o.getClass().getMethod(getterName));
+                } catch (NoSuchMethodException e) {
+                    throw e;
+                }
             }
-            String getter = "get" + property.substring(0, 1).toUpperCase() + property.substring(1);
-            try {
-                Method getterMethod = o.getClass().getMethod(getter);
-                Object result = getterMethod.invoke(o);
-                return result;
-            } catch (NoSuchMethodException e) {
-                throw e;
-            } catch (InvocationTargetException e) {
-                throw e.getCause();
-            }
+
+            return invokeReadProperty(o, property, targetType, invocationPoint);
         }
 
         public static void invokeWriteProperty(Object o, String property, Class<?> valueType, boolean value, String targetType, String invocationPoint) throws Throwable {
@@ -263,15 +285,32 @@ public class PropertiesEnhancer extends Enhancer {
             if (o == null) {
                 throw new NullPointerException("Attempting to write a property " + property + " on a null object of type " + targetType + " (" + invocationPoint + ")");
             }
-            String setter = "set" + property.substring(0, 1).toUpperCase() + property.substring(1);
-            try {
-                Method setterMethod = o.getClass().getMethod(setter, valueType);
-                setterMethod.invoke(o, value);
-            } catch (NoSuchMethodException e) {
-                o.getClass().getField(property).set(o, value);
-            } catch (InvocationTargetException e) {
-                throw e.getCause();
+
+            String cacheKey = o.getClass().getName() + "#" + property;
+            Object setter = setterCache.get(cacheKey);
+
+            if (setter != null) {
+                if (setter instanceof Field) {
+                    ((Field) setter).set(o, value);
+                    return;
+                }
+
+                try {
+                    ((Method) setter).invoke(o, value);
+                    return;
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
             }
+
+            String setterName = "set" + property.substring(0, 1).toUpperCase() + property.substring(1);
+            try {
+                setterCache.put(cacheKey, o.getClass().getMethod(setterName, valueType));
+            } catch (NoSuchMethodException e) {
+                setterCache.put(cacheKey, o.getClass().getField(property));
+            }
+
+            invokeWriteProperty(o, property, valueType, value, targetType, invocationPoint);
         }
     }
 
