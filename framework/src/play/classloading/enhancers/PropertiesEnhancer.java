@@ -219,34 +219,39 @@ public class PropertiesEnhancer extends Enhancer {
                 throw new NullPointerException("Try to read " + property + " on null object " + targetType + " (" + invocationPoint + ")");
             }
 
-            String cacheKey = o.getClass().getName() + "#" + property;
-            Object getter = getterCache.get(cacheKey);
+            String cacheKey = o.getClass() + "#" + property;
+            Object getter = null;
+            
+            if(play.Play.mode.isProd()) {
+				getter = getterCache.get(cacheKey);
+	        }
 
-            if (getter != null) {
-                if (getter instanceof Field) {
-                    return ((Field) getter).get(o);
-                }
-
-                try {
-                    return ((Method) getter).invoke(o);
-                } catch (InvocationTargetException e) {
-                    throw e.getCause();
-                }
+            if (getter == null) {
+				if (o.getClass().getClassLoader() == null || !o.getClass().getClassLoader().equals(Play.classloader)) {
+					getter = o.getClass().getField(property);
+				} else {
+					String getterName = "get" + property.substring(0, 1).toUpperCase() + property.substring(1);
+					try {
+						getter = o.getClass().getMethod(getterName);
+					} catch (NoSuchMethodException e) {
+						throw e;
+					}
+				}
+				
+				if(play.Play.mode.isProd()) {
+            		getterCache.put(cacheKey, getter);
+            	}
             }
+            
+			if (getter instanceof Field) {
+				return ((Field) getter).get(o);
+			}
 
-            // populate cache
-            if (o.getClass().getClassLoader() == null || !o.getClass().getClassLoader().equals(Play.classloader)) {
-                getterCache.put(cacheKey, o.getClass().getField(property));
-            } else {
-                String getterName = "get" + property.substring(0, 1).toUpperCase() + property.substring(1);
-                try {
-                    getterCache.put(cacheKey, o.getClass().getMethod(getterName));
-                } catch (NoSuchMethodException e) {
-                    throw e;
-                }
-            }
-
-            return invokeReadProperty(o, property, targetType, invocationPoint);
+			try {
+				return ((Method) getter).invoke(o);
+			} catch (InvocationTargetException e) {
+				throw e.getCause();
+			}
         }
 
         public static void invokeWriteProperty(Object o, String property, Class<?> valueType, boolean value, String targetType, String invocationPoint) throws Throwable {
@@ -286,31 +291,39 @@ public class PropertiesEnhancer extends Enhancer {
                 throw new NullPointerException("Attempting to write a property " + property + " on a null object of type " + targetType + " (" + invocationPoint + ")");
             }
 
-            String cacheKey = o.getClass().getName() + "#" + property;
-            Object setter = setterCache.get(cacheKey);
+            String cacheKey = o.getClass() + "#" + property;
+            
+            Object setter = null;
+            
+            if(play.Play.mode.isProd()) {
+	            setter = setterCache.get(cacheKey);
+	        }
+	        
+	        if(setter == null) {
+	            String setterName = "set" + property.substring(0, 1).toUpperCase() + property.substring(1);
+	            
+	        	try {
+	                setter = o.getClass().getMethod(setterName, valueType);
+    	        } catch (NoSuchMethodException e) {
+        	        setter = o.getClass().getField(property);
+            	}
+            	
+            	if(play.Play.mode.isProd()) {
+            		setterCache.put(cacheKey, setter);
+            	}
+	        }
 
-            if (setter != null) {
-                if (setter instanceof Field) {
-                    ((Field) setter).set(o, value);
-                    return;
-                }
+			if (setter instanceof Field) {
+				((Field) setter).set(o, value);
+				return;
+			}
 
-                try {
-                    ((Method) setter).invoke(o, value);
-                    return;
-                } catch (InvocationTargetException e) {
-                    throw e.getCause();
-                }
-            }
-
-            String setterName = "set" + property.substring(0, 1).toUpperCase() + property.substring(1);
-            try {
-                setterCache.put(cacheKey, o.getClass().getMethod(setterName, valueType));
-            } catch (NoSuchMethodException e) {
-                setterCache.put(cacheKey, o.getClass().getField(property));
-            }
-
-            invokeWriteProperty(o, property, valueType, value, targetType, invocationPoint);
+			try {
+				((Method) setter).invoke(o, value);
+				return;
+			} catch (InvocationTargetException e) {
+				throw e.getCause();
+			}
         }
     }
 
